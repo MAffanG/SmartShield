@@ -7,16 +7,19 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.ModelAndView;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 public class DemoInterceptor implements HandlerInterceptor {
 
     /**
-     * Thread-safe map to store request counts per IP.
+     * Thread-safe map to store request counts per IP.Map is updated ,and it stores timestamps list for the requests
      * ConcurrentHashMap is used because multiple requests (threads)
      * can access and update this map simultaneously.
      */
-    private static final Map<String ,Integer> requestCounts=new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<String , List<Long>> requestTimestamps=new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * preHandle() runs BEFORE the request reaches the controller.
@@ -31,20 +34,34 @@ public class DemoInterceptor implements HandlerInterceptor {
         //Get client IP address(for tracking requests per user)
         String ipAddr= request.getRemoteAddr();
 
-        requestCounts.put(ipAddr,requestCounts.getOrDefault(ipAddr,0)+1);
+        //use to track when request came
+        long now=System.currentTimeMillis();
+        //Creating a timestamp list and storing request times for each ip to apply time based filtering
+        requestTimestamps.putIfAbsent(ipAddr, Collections.synchronizedList(new ArrayList<>()));
+
+        List<Long> timeStamps=requestTimestamps.get(ipAddr);
+
+        /*
+          Remove old requests , we only care about the requests in the last 60 seconds(Sliding Window approach)
+         */
+        long windowStart=now-60000;//60 secs window
+        timeStamps.removeIf(time->time < windowStart);
 
         /*
           Simple rate limiting logic :
-          If a single IP makes more than 5 requests,block further requests
+          If number of requests in last 60 sec from an IP >= 5 → block further requests
          */
-        if(requestCounts.get(ipAddr)>5){
+        if(timeStamps.size()>=5){
             System.out.println("Blocked ip : "+ipAddr);
             response.setStatus(429);
-            response.getWriter().write("Too many requests");
+            response.getWriter().write("Too many requests - try again later");
 
             //return false stops the request here itself
             return false;
         }
+
+        //record current timestamp i.e. allow the request
+        timeStamps.add(now);
 
         /*
          * Generating a unique request ID to track this request
@@ -54,8 +71,7 @@ public class DemoInterceptor implements HandlerInterceptor {
         request.setAttribute("requestId", id);
 
         System.out.println(id + " PRE");
-        System.out.println("IP : "+ipAddr+", Request Count : "+requestCounts.get(ipAddr));
-
+        System.out.println("IP : "+ipAddr+"| Requests(last 60 secs) : "+timeStamps.size());
         return true;
     }
 
