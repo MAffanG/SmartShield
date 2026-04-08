@@ -14,6 +14,8 @@ import java.util.Map;
 
 public class DemoInterceptor implements HandlerInterceptor {
 
+    private static final int MAX_REQUESTS = 5;
+    private static final long TIME_WINDOW = 60000;
     /**
      * Thread-safe map to store request counts per IP.Map is updated ,and it stores timestamps list for the requests
      * ConcurrentHashMap is used because multiple requests (threads)
@@ -44,17 +46,23 @@ public class DemoInterceptor implements HandlerInterceptor {
         /*
           Remove old requests , we only care about the requests in the last 60 seconds(Sliding Window approach)
          */
-        long windowStart=now-60000;//60 secs window
+        long windowStart=now-TIME_WINDOW;//60 secs window
         timeStamps.removeIf(time->time < windowStart);
 
         /*
           Simple rate limiting logic :
           If number of requests in last 60 sec from an IP >= 5 → block further requests
          */
-        if(timeStamps.size()>=5){
+        if(timeStamps.size()>=MAX_REQUESTS){
             System.out.println("Blocked ip : "+ipAddr);
-            response.setStatus(429);
-            response.getWriter().write("Too many requests - try again later");
+            response.setContentType("application/json");
+            String jsonResponse = "{"
+                    + "\"error\": \"Too Many Requests\","
+                    + "message\": \"Rate limit exceeded. You shall not pass (for now).\""
+                    + "\"status\": 429,"
+                    + "\"timestamp\": " + System.currentTimeMillis()
+                    + "}";
+            response.getWriter().write(jsonResponse);
 
             //return false stops the request here itself
             return false;
