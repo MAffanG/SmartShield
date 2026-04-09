@@ -12,4 +12,9 @@ public class TestController {
         return "API Works";
     }
 
+    @GetMapping("/login")
+    public String login(){
+        System.out.println("Login hit!");
+        return "Login Page";
+    }
 }

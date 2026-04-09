@@ -14,7 +14,7 @@ import java.util.Map;
 
 public class DemoInterceptor implements HandlerInterceptor {
 
-    private static final int MAX_REQUESTS = 5;
+    //private static final int MAX_REQUESTS = 5;
     private static final long TIME_WINDOW = 60000;
     /**
      * Thread-safe map to store request counts per IP.Map is updated ,and it stores timestamps list for the requests
@@ -33,15 +33,23 @@ public class DemoInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
 
+        String path=request.getRequestURI();
+
         //Get client IP address(for tracking requests per user)
         String ipAddr= request.getRemoteAddr();
+
+        /**
+         * Identify client + endpoint
+         * Combines IP and request path to track rate limiting per endpoint.
+         */
+        String key=ipAddr+":"+path;
 
         //use to track when request came
         long now=System.currentTimeMillis();
         //Creating a timestamp list and storing request times for each ip to apply time based filtering
-        requestTimestamps.putIfAbsent(ipAddr, Collections.synchronizedList(new ArrayList<>()));
+        requestTimestamps.putIfAbsent(key, Collections.synchronizedList(new ArrayList<>()));
 
-        List<Long> timeStamps=requestTimestamps.get(ipAddr);
+        List<Long> timeStamps=requestTimestamps.get(key);
 
         /*
           Remove old requests , we only care about the requests in the last 60 seconds(Sliding Window approach)
@@ -49,16 +57,22 @@ public class DemoInterceptor implements HandlerInterceptor {
         long windowStart=now-TIME_WINDOW;//60 secs window
         timeStamps.removeIf(time->time < windowStart);
 
+        int maxRequest=path.contains("/login") ? 3 : 5;
+
         /*
           Simple rate limiting logic :
-          If number of requests in last 60 sec from an IP >= 5 → block further requests
+          If number of requests in last 60 sec from an IP >= maxRequest → block further requests
          */
-        if(timeStamps.size()>=MAX_REQUESTS){
-            System.out.println("Blocked ip : "+ipAddr);
+        if(timeStamps.size()>=maxRequest){
+
+            long oldest=timeStamps.get(0);
+            long retryAfter=(oldest+TIME_WINDOW) - now; //calculate retry time based on oldest request.
+
+            System.out.println("[Blocked] IP : "+ipAddr+"\t| Path : "+path+"\t| Limit : "+timeStamps.size()+" exceeded"+"\t Retry : "+retryAfter/1000+" secs.");
             response.setContentType("application/json");
             String jsonResponse = "{"
                     + "\"error\": \"Too Many Requests\","
-                    + "message\": \"Rate limit exceeded. You shall not pass (for now).\""
+                    + "message\": \"Rate limit exceeded. You shall not pass (for now).\","
                     + "\"status\": 429,"
                     + "\"timestamp\": " + System.currentTimeMillis()
                     + "}";
@@ -75,11 +89,12 @@ public class DemoInterceptor implements HandlerInterceptor {
          * Generating a unique request ID to track this request
          * across preHandle, postHandle, and afterCompletion.
          */
-        String id = java.util.UUID.randomUUID().toString();
+        /*String id = java.util.UUID.randomUUID().toString();
         request.setAttribute("requestId", id);
 
-        System.out.println(id + " PRE");
-        System.out.println("IP : "+ipAddr+"| Requests(last 60 secs) : "+timeStamps.size());
+        System.out.println(id + " PRE");*/
+
+        System.out.println("[Allowed] IP : "+ipAddr+"\t| Path : "+path+"\t| Requests(last 60 secs) : "+"\t| "+timeStamps.size()+"/"+maxRequest);
         return true;
     }
 
@@ -90,8 +105,8 @@ public class DemoInterceptor implements HandlerInterceptor {
     @Override
     public void postHandle(HttpServletRequest request, HttpServletResponse response, Object handler, @Nullable ModelAndView modelAndView) throws Exception {
 
-        String id = (String) request.getAttribute("requestId");
-        System.out.println(id + " POST");
+       /* String id = (String) request.getAttribute("requestId");
+        System.out.println(id + " POST");*/
     }
 
     /**
@@ -100,7 +115,7 @@ public class DemoInterceptor implements HandlerInterceptor {
      */
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, @Nullable Exception ex) throws Exception {
-        String id = (String) request.getAttribute("requestId");
-        System.out.println(id + " AFTER + IP: " + request.getRemoteAddr());
+        /*String id = (String) request.getAttribute("requestId");
+        System.out.println(id + " AFTER + IP: " + request.getRemoteAddr());*/
     }
 }
