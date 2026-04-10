@@ -7,6 +7,12 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
 
+    private final DemoInterceptor demoInterceptor;
+
+    public WebConfig(DemoInterceptor demoInterceptor){
+        this.demoInterceptor=demoInterceptor;
+    }
+
     /**
      *This method registers the interceptor with Spring.
      *Without this, the interceptor will NOT run.
@@ -14,6 +20,6 @@ public class WebConfig implements WebMvcConfigurer {
      */
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(new DemoInterceptor());
+        registry.addInterceptor(demoInterceptor);
     }
 }
