@@ -11,6 +11,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.ModelAndView;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentLinkedDeque;
 
 @Component
 public class DemoInterceptor implements HandlerInterceptor {
@@ -29,7 +30,11 @@ public class DemoInterceptor implements HandlerInterceptor {
      * ConcurrentHashMap is used because multiple requests (threads)
      * can access and update this map simultaneously.
      */
-    private static final Map<String , List<Long>> requestTimestamps=new java.util.concurrent.ConcurrentHashMap<>();
+
+  //  private static final Map<String , List<Long>> requestTimestamps=new java.util.concurrent.ConcurrentHashMap<>();
+
+    // Using Deque for efficient sliding window: O(1) removal of oldest requests from the front instead of O(n) when we were using list
+    private static final Map<String , Deque<Long>> requestTimestamps=new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * preHandle() runs BEFORE the request reaches the controller.
@@ -63,15 +68,20 @@ public class DemoInterceptor implements HandlerInterceptor {
         //use to track when request came
         long now=System.currentTimeMillis();
         //Creating a timestamp list and storing request times for each ip to apply time based filtering
-        requestTimestamps.putIfAbsent(key, Collections.synchronizedList(new ArrayList<>()));
+        //requestTimestamps.putIfAbsent(key, Collections.synchronizedList((List<Object>) new ArrayList<>()));
+        requestTimestamps.putIfAbsent(key, new ConcurrentLinkedDeque<>());
 
-        List<Long> timeStamps=requestTimestamps.get(key);
+        Deque<Long> timeStamps=requestTimestamps.get(key);
 
         /*
           Remove old requests , we only care about the requests in the last 60 seconds(Sliding Window approach)
          */
         long windowStart=now-window;
-        timeStamps.removeIf(time->time < windowStart);
+
+        while(!timeStamps.isEmpty() && timeStamps.peekFirst()<windowStart){
+            timeStamps.pollFirst();
+        }
+        //timeStamps.removeIf(time->time < windowStart);
 
         //int maxRequest=path.contains("/login") ? 3 : 5;
 
@@ -81,13 +91,18 @@ public class DemoInterceptor implements HandlerInterceptor {
          */
         if(timeStamps.size()>=maxRequests){
 
-            long oldest=timeStamps.get(0);
-            long retryAfter=(oldest+window) - now; //calculate retry time based on oldest request.
+            long oldest=timeStamps.peekFirst();
+
+            long retryAfter = Math.max(0, (oldest + window) - now); //calculate retry time based on oldest request.
+            //long retryAfter=(oldest+window) - now;
 
             //System.out.println("[Blocked] IP : "+ipAddr+"\t| Path : "+path+"\t| Limit : "+timeStamps.size()+" exceeded"+"\t Retry : "+retryAfter/1000+" secs.");
             log.warn("[Blocked] IP : {} Path : {} Limit : {} exceeded  Retry : {} secs",ipAddr,path,timeStamps.size(),retryAfter/1000);
 
             response.setStatus(429);
+            response.setHeader("Retry-After", String.valueOf(retryAfter / 1000));
+            response.setHeader("RateLimit-Limit", String.valueOf(maxRequests));
+            response.setHeader("RateLimit-Remaining", "0");
             response.setContentType("application/json");
             String jsonResponse = "{"
                     + "\"error\": \"Too Many Requests\","
@@ -102,7 +117,7 @@ public class DemoInterceptor implements HandlerInterceptor {
         }
 
         //record current timestamp i.e. allow the request
-        timeStamps.add(now);
+        timeStamps.addLast(now);
 
         /*
          * Generating a unique request ID to track this request
@@ -115,6 +130,8 @@ public class DemoInterceptor implements HandlerInterceptor {
 
         //System.out.println("[Allowed] IP : "+ipAddr+"\t| Path : "+path+"\t| Requests(last 60 secs) : "+"\t| "+timeStamps.size()+"/"+maxRequests);
 
+        response.setHeader("RateLimit-Limit", String.valueOf(maxRequests));
+        response.setHeader("RateLimit-Remaining", String.valueOf(maxRequests - timeStamps.size()));
         log.info("[Allowed] IP : {} Path : {} Requests(last 60 secs) : {}/{}",ipAddr,path,timeStamps.size(),maxRequests);
 
         return true;
