@@ -6,7 +6,6 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.ModelAndView;
@@ -18,14 +17,11 @@ import java.util.concurrent.ConcurrentLinkedDeque;
 public class DemoInterceptor implements HandlerInterceptor {
 
     private static final Logger log= LoggerFactory.getLogger(DemoInterceptor.class);
+
     private final  RateLimitConfig config;
-    private final RateLimiterService service;
-
-    @Autowired
-    public DemoInterceptor(RateLimitConfig config, RateLimiterService service){
-        this.config = config;
-        this.service=service;}
-
+    public DemoInterceptor(RateLimitConfig config){
+        this.config=config;
+    }
 
     //private static final int MAX_REQUESTS = 5;
     //private static final long TIME_WINDOW = 60000;
@@ -70,24 +66,21 @@ public class DemoInterceptor implements HandlerInterceptor {
         String key=ipAddr+":"+path;
 
         //use to track when request came
-
-       /* long now=System.currentTimeMillis();*/
-
+        long now=System.currentTimeMillis();
         //Creating a timestamp list and storing request times for each ip to apply time based filtering
         //requestTimestamps.putIfAbsent(key, Collections.synchronizedList((List<Object>) new ArrayList<>()));
-        /* Rare race condition might occur
         requestTimestamps.putIfAbsent(key, new ConcurrentLinkedDeque<>());
-        Deque<Long> timeStamps=requestTimestamps.get(key);*/
-       /* Deque<Long> timeStamps=requestTimestamps.computeIfAbsent(key,k -> new ConcurrentLinkedDeque<>());*/
+
+        Deque<Long> timeStamps=requestTimestamps.get(key);
 
         /*
           Remove old requests , we only care about the requests in the last 60 seconds(Sliding Window approach)
          */
-        /*long windowStart=now-window;
+        long windowStart=now-window;
 
         while(!timeStamps.isEmpty() && timeStamps.peekFirst()<windowStart){
             timeStamps.pollFirst();
-        }*/
+        }
         //timeStamps.removeIf(time->time < windowStart);
 
         //int maxRequest=path.contains("/login") ? 3 : 5;
@@ -96,30 +89,20 @@ public class DemoInterceptor implements HandlerInterceptor {
           Simple rate limiting logic :
           If number of requests in last 60 sec from an IP >= maxRequest → block further requests
          */
+        if(timeStamps.size()>=maxRequests){
 
-        
-        // Delegating rate-limiting logic to a dedicated service layer.
-        // This keeps the interceptor lightweight and focuses only on request handling,
-        // while the service encapsulates the core business logic for better modularity and reusability.
-        boolean allowed=service.allowRequest(key,maxRequests,window);
+            long oldest=timeStamps.peekFirst();
 
-//        if(timeStamps.size()>=maxRequests){
-
-          /*  long oldest=timeStamps.peekFirst();
-
-            long retryAfter = Math.max(0, (oldest + window) - now);*/ //calculate retry time based on oldest request.
+            long retryAfter = Math.max(0, (oldest + window) - now); //calculate retry time based on oldest request.
             //long retryAfter=(oldest+window) - now;
 
-          if(!allowed){
             //System.out.println("[Blocked] IP : "+ipAddr+"\t| Path : "+path+"\t| Limit : "+timeStamps.size()+" exceeded"+"\t Retry : "+retryAfter/1000+" secs.");
-//            log.warn("[Blocked] IP : {} Path : {} Limit : {} exceeded  Retry : {} secs",ipAddr,path,timeStamps.size(),retryAfter/1000);
-            log.warn("[Blocked] IP : {} Path : {}",ipAddr,path);
+            log.warn("[Blocked] IP : {} Path : {} Limit : {} exceeded  Retry : {} secs",ipAddr,path,timeStamps.size(),retryAfter/1000);
 
             response.setStatus(429);
-           // response.setHeader("Retry-After", String.valueOf(retryAfter / 1000));
+            response.setHeader("Retry-After", String.valueOf(retryAfter / 1000));
             response.setHeader("RateLimit-Limit", String.valueOf(maxRequests));
             response.setHeader("RateLimit-Remaining", "0");
-            //response.setHeader("RateLimit-Reset", String.valueOf((oldest + window) / 1000));
             response.setContentType("application/json");
             String jsonResponse = "{"
                     + "\"error\": \"Too Many Requests\","
@@ -134,7 +117,7 @@ public class DemoInterceptor implements HandlerInterceptor {
         }
 
         //record current timestamp i.e. allow the request
-        //timeStamps.addLast(now);
+        timeStamps.addLast(now);
 
         /*
          * Generating a unique request ID to track this request
@@ -148,9 +131,8 @@ public class DemoInterceptor implements HandlerInterceptor {
         //System.out.println("[Allowed] IP : "+ipAddr+"\t| Path : "+path+"\t| Requests(last 60 secs) : "+"\t| "+timeStamps.size()+"/"+maxRequests);
 
         response.setHeader("RateLimit-Limit", String.valueOf(maxRequests));
-       // response.setHeader("RateLimit-Remaining", String.valueOf(maxRequests - timeStamps.size()));
-      //  log.info("[Allowed] IP : {} Path : {} Requests(last 60 secs) : {}/{}",ipAddr,path,timeStamps.size(),maxRequests);
-        log.info("[Allowed] IP : {} Path : {}",ipAddr,path);
+        response.setHeader("RateLimit-Remaining", String.valueOf(maxRequests - timeStamps.size()));
+        log.info("[Allowed] IP : {} Path : {} Requests(last 60 secs) : {}/{}",ipAddr,path,timeStamps.size(),maxRequests);
 
         return true;
     }
