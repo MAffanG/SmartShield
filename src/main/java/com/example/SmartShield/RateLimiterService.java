@@ -12,7 +12,7 @@ public class RateLimiterService {
     private final Map<String , Deque<Long>> requestTimestamps=new java.util.concurrent.ConcurrentHashMap<>();
 
 
-    public boolean allowRequest(String key,int maxRequests,long windowMs){
+    public RateLimitResult checkRequest(String key,int maxRequests,long windowMs){
 
         long now=System.currentTimeMillis();
         long windowStart=now-windowMs;
@@ -24,12 +24,16 @@ public class RateLimiterService {
             timestamps.pollFirst();
         }
 
-        if(timestamps.size()>=maxRequests){
-            return false;
+        int currentSize=timestamps.size();
+
+        if(currentSize>=maxRequests){
+            long oldest=timestamps.peekFirst();
+            long retryAfter=Math.max(0,(oldest+windowMs)-now);
+            return new RateLimitResult(false,retryAfter,0);
         }
 
         timestamps.addLast(now);
-
-        return true;
+        int remaining=maxRequests-timestamps.size();
+        return new RateLimitResult(true,0,remaining);
     }
 }

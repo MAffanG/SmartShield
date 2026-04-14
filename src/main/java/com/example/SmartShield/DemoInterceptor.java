@@ -101,7 +101,8 @@ public class DemoInterceptor implements HandlerInterceptor {
         // Delegating rate-limiting logic to a dedicated service layer.
         // This keeps the interceptor lightweight and focuses only on request handling,
         // while the service encapsulates the core business logic for better modularity and reusability.
-        boolean allowed=service.allowRequest(key,maxRequests,window);
+//        boolean allowed=service.allowRequest(key,maxRequests,window);
+        RateLimitResult result=service.checkRequest(key,maxRequests,window);
 
 //        if(timeStamps.size()>=maxRequests){
 
@@ -110,16 +111,18 @@ public class DemoInterceptor implements HandlerInterceptor {
             long retryAfter = Math.max(0, (oldest + window) - now);*/ //calculate retry time based on oldest request.
             //long retryAfter=(oldest+window) - now;
 
-          if(!allowed){
+          if(!result.isAllowed()){
             //System.out.println("[Blocked] IP : "+ipAddr+"\t| Path : "+path+"\t| Limit : "+timeStamps.size()+" exceeded"+"\t Retry : "+retryAfter/1000+" secs.");
 //            log.warn("[Blocked] IP : {} Path : {} Limit : {} exceeded  Retry : {} secs",ipAddr,path,timeStamps.size(),retryAfter/1000);
-            log.warn("[Blocked] IP : {} Path : {}",ipAddr,path);
+            log.warn("[Blocked] IP : {} Path : {} Retry : {} secs",ipAddr,path,result.getRetryAfter()/1000);
 
             response.setStatus(429);
            // response.setHeader("Retry-After", String.valueOf(retryAfter / 1000));
+            response.setHeader("Retry-After", String.valueOf(Math.max(1,result.getRetryAfter()/1000)));
             response.setHeader("RateLimit-Limit", String.valueOf(maxRequests));
             response.setHeader("RateLimit-Remaining", "0");
             //response.setHeader("RateLimit-Reset", String.valueOf((oldest + window) / 1000));
+            response.setHeader("RateLimit-Reset", String.valueOf((System.currentTimeMillis() + result.getRetryAfter()) / 1000));
             response.setContentType("application/json");
             String jsonResponse = "{"
                     + "\"error\": \"Too Many Requests\","
@@ -148,9 +151,9 @@ public class DemoInterceptor implements HandlerInterceptor {
         //System.out.println("[Allowed] IP : "+ipAddr+"\t| Path : "+path+"\t| Requests(last 60 secs) : "+"\t| "+timeStamps.size()+"/"+maxRequests);
 
         response.setHeader("RateLimit-Limit", String.valueOf(maxRequests));
-       // response.setHeader("RateLimit-Remaining", String.valueOf(maxRequests - timeStamps.size()));
+        response.setHeader("RateLimit-Remaining", String.valueOf(result.getRemaining()));
       //  log.info("[Allowed] IP : {} Path : {} Requests(last 60 secs) : {}/{}",ipAddr,path,timeStamps.size(),maxRequests);
-        log.info("[Allowed] IP : {} Path : {}",ipAddr,path);
+        log.info("[Allowed] IP : {} Path : {}  Remaining : {}",ipAddr,path,result.getRemaining());
 
         return true;
     }
