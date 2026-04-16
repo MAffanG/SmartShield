@@ -8,11 +8,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
+import org.springframework.web.servlet.HandlerMapping;
 import org.springframework.web.servlet.ModelAndView;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.logging.Handler;
 
 @Component
 public class DemoInterceptor implements HandlerInterceptor {
@@ -50,24 +53,24 @@ public class DemoInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
 
-        String path=request.getRequestURI();
-
-        //Get client IP address(for tracking requests per user)
-        String ipAddr= request.getRemoteAddr();
-
-        int maxRequests=path.contains("/login") ?
-                config.getLogin().getMaxRequests() : config.getDefaultLimit().getMaxRequests();
-
-//      //dynamic window size
-        long window=path.contains("/login") ?
-                config.getLogin().getWindowMs() : config.getDefaultLimit().getWindowMs();
+//        String path=request.getRequestURI();
+//
+//        //Get client IP address(for tracking requests per user)
+//        String ipAddr= request.getRemoteAddr();
+//
+//        int maxRequests=path.contains("/login") ?
+//                config.getLogin().getMaxRequests() : config.getDefaultLimit().getMaxRequests();
+//
+////      //dynamic window size
+//        long window=path.contains("/login") ?
+//                config.getLogin().getWindowMs() : config.getDefaultLimit().getWindowMs();
 
 
         /**
          * Identify client + endpoint
          * Combines IP and request path to track rate limiting per endpoint.
          */
-        String key=ipAddr+":"+path;
+//        String key=ipAddr+":"+path;
 
         //use to track when request came
 
@@ -98,63 +101,78 @@ public class DemoInterceptor implements HandlerInterceptor {
          */
 
 
-        // Delegating rate-limiting logic to a dedicated service layer.
-        // This keeps the interceptor lightweight and focuses only on request handling,
-        // while the service encapsulates the core business logic for better modularity and reusability.
+        if(handler instanceof HandlerMethod method) {
+
+            RateLimited rateLimited = method.getMethodAnnotation(RateLimited.class);
+
+            if (rateLimited != null) {
+
+                int maxRequests= rateLimited.maxRequests();
+                long window=rateLimited.windowMs();
+
+                String ipAddr= request.getRemoteAddr();
+                String path=request.getRequestURI();
+
+                String key=ipAddr+":"+path;
+                // Delegating rate-limiting logic to a dedicated service layer.
+                // This keeps the interceptor lightweight and focuses only on request handling,
+                // while the service encapsulates the core business logic for better modularity and reusability.
 //        boolean allowed=service.allowRequest(key,maxRequests,window);
-        RateLimitResult result=service.checkRequest(key,maxRequests,window);
+                RateLimitResult result = service.checkRequest(key, maxRequests, window);
 
 //        if(timeStamps.size()>=maxRequests){
 
           /*  long oldest=timeStamps.peekFirst();
 
             long retryAfter = Math.max(0, (oldest + window) - now);*/ //calculate retry time based on oldest request.
-            //long retryAfter=(oldest+window) - now;
+                //long retryAfter=(oldest+window) - now;
 
-          if(!result.isAllowed()){
-            //System.out.println("[Blocked] IP : "+ipAddr+"\t| Path : "+path+"\t| Limit : "+timeStamps.size()+" exceeded"+"\t Retry : "+retryAfter/1000+" secs.");
+                if (!result.isAllowed()) {
+                    //System.out.println("[Blocked] IP : "+ipAddr+"\t| Path : "+path+"\t| Limit : "+timeStamps.size()+" exceeded"+"\t Retry : "+retryAfter/1000+" secs.");
 //            log.warn("[Blocked] IP : {} Path : {} Limit : {} exceeded  Retry : {} secs",ipAddr,path,timeStamps.size(),retryAfter/1000);
-            log.warn("[Blocked] IP : {} Path : {} Retry : {} secs",ipAddr,path,result.getRetryAfter()/1000);
+                    log.warn("[Blocked] IP : {} Path : {} Retry : {} secs", ipAddr, path, result.getRetryAfter() / 1000);
 
-            response.setStatus(429);
-           // response.setHeader("Retry-After", String.valueOf(retryAfter / 1000));
-            response.setHeader("Retry-After", String.valueOf(Math.max(1,result.getRetryAfter()/1000)));
-            response.setHeader("RateLimit-Limit", String.valueOf(maxRequests));
-            response.setHeader("RateLimit-Remaining", "0");
-            //response.setHeader("RateLimit-Reset", String.valueOf((oldest + window) / 1000));
-            response.setHeader("RateLimit-Reset", String.valueOf((System.currentTimeMillis() + result.getRetryAfter()) / 1000));
-            response.setContentType("application/json");
-            String jsonResponse = "{"
-                    + "\"error\": \"Too Many Requests\","
-                    + "\"message\": \"Rate limit exceeded. You shall not pass (for now).\","
-                    + "\"status\": 429,"
-                    + "\"timestamp\": " + System.currentTimeMillis()
-                    + "}";
-            response.getWriter().write(jsonResponse);
+                    response.setStatus(429);
+                    // response.setHeader("Retry-After", String.valueOf(retryAfter / 1000));
+                    response.setHeader("Retry-After", String.valueOf(Math.max(1, result.getRetryAfter() / 1000)));
+                    response.setHeader("RateLimit-Limit", String.valueOf(maxRequests));
+                    response.setHeader("RateLimit-Remaining", "0");
+                    //response.setHeader("RateLimit-Reset", String.valueOf((oldest + window) / 1000));
+                    response.setHeader("RateLimit-Reset", String.valueOf((System.currentTimeMillis() + result.getRetryAfter()) / 1000));
+                    response.setContentType("application/json");
+                    String jsonResponse = "{"
+                            + "\"error\": \"Too Many Requests\","
+                            + "\"message\": \"Rate limit exceeded. You shall not pass (for now).\","
+                            + "\"status\": 429,"
+                            + "\"timestamp\": " + System.currentTimeMillis()
+                            + "}";
+                    response.getWriter().write(jsonResponse);
 
-            //return false stops the request here itself
-            return false;
-        }
+                    //return false stops the request here itself
+                    return false;
+                }
 
-        //record current timestamp i.e. allow the request
-        //timeStamps.addLast(now);
+                //record current timestamp i.e. allow the request
+                //timeStamps.addLast(now);
 
-        /*
-         * Generating a unique request ID to track this request
-         * across preHandle, postHandle, and afterCompletion.
-         */
+                /*
+                 * Generating a unique request ID to track this request
+                 * across preHandle, postHandle, and afterCompletion.
+                 */
         /*String id = java.util.UUID.randomUUID().toString();
         request.setAttribute("requestId", id);
 
         System.out.println(id + " PRE");*/
 
-        //System.out.println("[Allowed] IP : "+ipAddr+"\t| Path : "+path+"\t| Requests(last 60 secs) : "+"\t| "+timeStamps.size()+"/"+maxRequests);
+                //System.out.println("[Allowed] IP : "+ipAddr+"\t| Path : "+path+"\t| Requests(last 60 secs) : "+"\t| "+timeStamps.size()+"/"+maxRequests);
 
-        response.setHeader("RateLimit-Limit", String.valueOf(maxRequests));
-        response.setHeader("RateLimit-Remaining", String.valueOf(result.getRemaining()));
-      //  log.info("[Allowed] IP : {} Path : {} Requests(last 60 secs) : {}/{}",ipAddr,path,timeStamps.size(),maxRequests);
-        log.info("[Allowed] IP : {} Path : {}  Remaining : {}",ipAddr,path,result.getRemaining());
-
+                //allowed
+                response.setHeader("RateLimit-Limit", String.valueOf(maxRequests));
+                response.setHeader("RateLimit-Remaining", String.valueOf(result.getRemaining()));
+                //  log.info("[Allowed] IP : {} Path : {} Requests(last 60 secs) : {}/{}",ipAddr,path,timeStamps.size(),maxRequests);
+                log.info("[Allowed] IP : {} Path : {}  Remaining : {}", ipAddr, path, result.getRemaining());
+            }
+        }
         return true;
     }
 
