@@ -20,4 +20,11 @@ public class TestController {
         System.out.println("Login hit!");
         return "Login Page";
     }
+
+    @GetMapping("/dev")
+    public String dev(){
+        System.out.println("Dev hit!");
+        return "Dev Page";
+    }
+
 }

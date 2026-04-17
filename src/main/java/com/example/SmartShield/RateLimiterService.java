@@ -1,6 +1,8 @@
 package com.example.SmartShield;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.web.method.HandlerMethod;
 
 import java.util.Deque;
 import java.util.Map;
@@ -12,14 +14,29 @@ public class RateLimiterService {
     private final Map<String , Deque<Long>> requestTimestamps=new java.util.concurrent.ConcurrentHashMap<>();
 
 
-    public RateLimitResult checkRequest(String key,int maxRequests,long windowMs){
+    public RateLimitResult checkRequest(HttpServletRequest request, HandlerMethod handlerMethod){
+
+        //Read annotation
+        RateLimited rateLimited=handlerMethod.getMethodAnnotation(RateLimited.class);
+
+        //No annotation  - allow request
+        if(rateLimited==null){
+            return RateLimitResult.allowed();
+        }
+
+        int maxRequests= rateLimited.maxRequests();
+        long windowMs=rateLimited.windowMs();
 
         long now=System.currentTimeMillis();
         long windowStart=now-windowMs;
 
+        //Build key
+        String ip=request.getRemoteAddr();
+        String path=request.getRequestURI();
+        String key=ip+":"+path;
         Deque<Long> timestamps=requestTimestamps.computeIfAbsent(key,k->new ConcurrentLinkedDeque<>());
 
-        //remove old
+        //remove old requests ie.expired
         while(!timestamps.isEmpty() && timestamps.peekFirst()<windowStart){
             timestamps.pollFirst();
         }
@@ -29,11 +46,11 @@ public class RateLimiterService {
         if(currentSize>=maxRequests){
             long oldest=timestamps.peekFirst();
             long retryAfter=Math.max(0,(oldest+windowMs)-now);
-            return new RateLimitResult(false,retryAfter,0);
+            return RateLimitResult.blocked(retryAfter,maxRequests,0);
         }
 
         timestamps.addLast(now);
         int remaining=maxRequests-timestamps.size();
-        return new RateLimitResult(true,0,remaining);
+        return RateLimitResult.allowed(maxRequests, remaining);
     }
 }
