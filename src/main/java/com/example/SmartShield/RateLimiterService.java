@@ -13,6 +13,15 @@ public class RateLimiterService {
 
     private final Map<String , Deque<Long>> requestTimestamps=new java.util.concurrent.ConcurrentHashMap<>();
 
+    private String getClientIp(HttpServletRequest request){
+        String xfHeader=request.getHeader("X-Forwarded-For");
+
+        if(xfHeader!=null && !xfHeader.isEmpty()){
+            return xfHeader.split(",")[0].trim();
+        }
+
+        return request.getRemoteAddr();
+    }
 
     public RateLimitResult checkRequest(HttpServletRequest request, HandlerMethod handlerMethod){
 
@@ -31,7 +40,8 @@ public class RateLimiterService {
         long windowStart=now-windowMs;
 
         //Build key
-        String ip=request.getRemoteAddr();
+//        String ip=request.getRemoteAddr();
+        String ip=getClientIp(request);
         String path=request.getRequestURI();
         String key=ip+":"+path;
         Deque<Long> timestamps=requestTimestamps.computeIfAbsent(key,k->new ConcurrentLinkedDeque<>());

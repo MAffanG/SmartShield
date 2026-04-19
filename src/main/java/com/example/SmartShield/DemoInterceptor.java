@@ -54,9 +54,16 @@ public class DemoInterceptor implements HandlerInterceptor {
 //                RateLimitResult result = service.checkRequest(key, maxRequests, window);
                 RateLimitResult result = service.checkRequest(request, method);
 
+                String ipAddr=request.getHeader("X-Forwarded-For");
+
+                if(ipAddr!=null && !ipAddr.isEmpty()){
+                ipAddr=ipAddr.split(",")[0].trim();
+                }
+                else{
+                ipAddr=request.getRemoteAddr();
+                }
                 if (!result.isAllowed()) {
 
-                    String ipAddr=request.getRemoteAddr();
                     String path=request.getRequestURI();
                     log.warn("rate_limit_blocked IP : {} Path : {} retry_after_sec : {}", ipAddr, path, result.getRetryAfter() / 1000);
 
@@ -82,7 +89,7 @@ public class DemoInterceptor implements HandlerInterceptor {
                 response.setHeader("RateLimit-Limit", String.valueOf(result.getLimit()));
                 response.setHeader("RateLimit-Remaining", String.valueOf(result.getRemaining()));
             }
-                log.info("rate_limit_allowed IP : {} Path : {}  Remaining : {}", request.getRemoteAddr(), request.getRequestURI(), result.getRemaining());
+                log.info("rate_limit_allowed IP : {} Path : {}  Remaining : {}", ipAddr, request.getRequestURI(), result.getRemaining());
         }
         return true;
     }
