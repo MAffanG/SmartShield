@@ -20,11 +20,14 @@ public class DemoInterceptor implements HandlerInterceptor {
     private static final Logger log= LoggerFactory.getLogger(DemoInterceptor.class);
     private final  RateLimitConfig config;
     private final RateLimiterService service;
+    private final ClientIpResolver clientIpResolver;
 
     @Autowired
-    public DemoInterceptor(RateLimitConfig config, RateLimiterService service){
+    public DemoInterceptor(RateLimitConfig config, RateLimiterService service,ClientIpResolver clientIpResolver){
         this.config = config;
-        this.service=service;}
+        this.service=service;
+        this.clientIpResolver=clientIpResolver;
+    }
 
     /**
      * Thread-safe map to store request counts per IP.Map is updated ,and it stores timestamps list for the requests
@@ -54,14 +57,8 @@ public class DemoInterceptor implements HandlerInterceptor {
 //                RateLimitResult result = service.checkRequest(key, maxRequests, window);
                 RateLimitResult result = service.checkRequest(request, method);
 
-                String ipAddr=request.getHeader("X-Forwarded-For");
+                String ipAddr=clientIpResolver.getClientIp(request);
 
-                if(ipAddr!=null && !ipAddr.isEmpty()){
-                ipAddr=ipAddr.split(",")[0].trim();
-                }
-                else{
-                ipAddr=request.getRemoteAddr();
-                }
                 if (!result.isAllowed()) {
 
                     String path=request.getRequestURI();
