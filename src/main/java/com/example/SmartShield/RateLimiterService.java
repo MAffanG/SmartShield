@@ -24,13 +24,19 @@ public class RateLimiterService {
         //Read annotation
         RateLimited rateLimited=handlerMethod.getMethodAnnotation(RateLimited.class);
 
-        //No annotation  - allow request
-        if(rateLimited==null){
-            return RateLimitResult.allowed();
+        int maxRequests;
+        long windowMs;
+        //No annotation  - setting a default value for the request
+        if(rateLimited!=null){
+            maxRequests= rateLimited.maxRequests();
+            windowMs=rateLimited.windowMs();
+        }
+        else{
+            maxRequests=6;
+            windowMs=60000;
         }
 
-        int maxRequests= rateLimited.maxRequests();
-        long windowMs=rateLimited.windowMs();
+
 
         long now=System.currentTimeMillis();
         long windowStart=now-windowMs;
@@ -39,7 +45,7 @@ public class RateLimiterService {
 //        String ip=request.getRemoteAddr();
         String ip=clientIpResolver.getClientIp(request);
         String path=request.getRequestURI();
-        String key=ip+":"+path;
+        String key=ip+":"+request.getMethod()+":"+path;
         Deque<Long> timestamps=requestTimestamps.computeIfAbsent(key,k->new ConcurrentLinkedDeque<>());
 
         //remove old requests ie.expired
